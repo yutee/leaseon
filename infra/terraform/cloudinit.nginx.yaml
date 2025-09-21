@@ -1,0 +1,46 @@
+#cloud-config
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - docker.io
+  - curl
+
+# Create docker group and add user
+groups:
+  - docker
+
+users:
+  - default
+  - name: azureuser
+    groups: [sudo, docker]
+    shell: /bin/bash
+
+# Commands to run
+runcmd:
+  # Enable and start Docker
+  - systemctl enable docker
+  - systemctl start docker
+  
+  # Wait for Docker to be ready
+  - sleep 10
+  
+  # Pull and run Nginx container
+  - docker pull nginx:latest
+  - docker run -d --name nginx --restart=unless-stopped -p 8000:80 nginx:latest
+  
+  # Wait a bit for container to start
+  - sleep 10
+
+  # Setup healthcheck
+  - docker exec nginx bash -c 'echo "ok" > /usr/share/nginx/html/health'
+  - curl -I http://localhost:8000/health || echo "Health endpoint not ready"
+  
+  # Test the setup
+  - curl -I http://localhost || echo "Nginx not ready yet"
+
+# Set timezone
+timezone: UTC
+
+final_message: "Nginx with Docker setup complete! Default page should be accessible."

@@ -1,0 +1,159 @@
+#cloud-config
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - docker.io
+  - curl
+
+# Create docker group and add user
+groups:
+  - docker
+
+users:
+  - default
+  - name: azureuser
+    groups: [sudo, docker]
+    shell: /bin/bash
+
+# Write files to the system
+write_files:
+  # Custom HTML template that will show VM info
+  - path: /tmp/index.html.template
+    content: |
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Load Balancer Test - VM Info</title>
+          <style>
+              body {
+                  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                  margin: 0;
+                  padding: 20px;
+                  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                  color: white;
+                  min-height: 100vh;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+              }
+              .container {
+                  background: rgba(255, 255, 255, 0.1);
+                  padding: 40px;
+                  border-radius: 15px;
+                  backdrop-filter: blur(10px);
+                  box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
+                  border: 1px solid rgba(255, 255, 255, 0.18);
+                  text-align: center;
+                  max-width: 600px;
+                  width: 100%;
+              }
+              h1 {
+                  margin-bottom: 30px;
+                  font-size: 2.5em;
+                  text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+              }
+              .info-box {
+                  background: rgba(255, 255, 255, 0.1);
+                  margin: 20px 0;
+                  padding: 20px;
+                  border-radius: 10px;
+                  border-left: 4px solid #4CAF50;
+              }
+              .label {
+                  font-weight: bold;
+                  font-size: 1.2em;
+                  margin-bottom: 5px;
+              }
+              .value {
+                  font-family: 'Courier New', monospace;
+                  font-size: 1.1em;
+                  word-break: break-all;
+              }
+              .timestamp {
+                  margin-top: 30px;
+                  font-size: 0.9em;
+                  opacity: 0.8;
+              }
+              .health-status {
+                  margin-top: 20px;
+                  padding: 10px;
+                  background: rgba(76, 175, 80, 0.2);
+                  border-radius: 5px;
+                  border: 1px solid #4CAF50;
+              }
+          </style>
+      </head>
+      <body>
+          <div class="container">
+              <h1>🚀 Load Balancer Test Page</h1>
+              <div class="info-box">
+                  <div class="label">Hostname:</div>
+                  <div class="value">HOSTNAME_PLACEHOLDER</div>
+              </div>
+              <div class="info-box">
+                  <div class="label">Private IP Address:</div>
+                  <div class="value">PRIVATE_IP_PLACEHOLDER</div>
+              </div>
+              <div class="info-box">
+                  <div class="label">Public IP Address:</div>
+                  <div class="value">PUBLIC_IP_PLACEHOLDER</div>
+              </div>
+              <div class="health-status">
+                  <strong>✅ Health Check:</strong> <a href="/health" style="color: #4CAF50;">/health</a> endpoint available
+              </div>
+              <div class="timestamp">
+                  Page generated at: TIMESTAMP_PLACEHOLDER
+              </div>
+          </div>
+      </body>
+      </html>
+    permissions: '0644'
+
+# Commands to run
+runcmd:
+  # Enable and start Docker
+  - systemctl enable docker
+  - systemctl start docker
+  
+  # Wait for Docker to be ready
+  - sleep 10
+  
+  # Get VM information
+  - HOSTNAME=$(hostname)
+  - PRIVATE_IP=$(hostname -I | awk '{print $1}')
+  - PUBLIC_IP=$(curl -s ifconfig.me || echo "Not available")
+  - TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S UTC')
+  
+  # Create the custom index.html with actual VM info
+  - sed -e "s/HOSTNAME_PLACEHOLDER/$HOSTNAME/g" -e "s/PRIVATE_IP_PLACEHOLDER/$PRIVATE_IP/g" -e "s/PUBLIC_IP_PLACEHOLDER/$PUBLIC_IP/g" -e "s/TIMESTAMP_PLACEHOLDER/$TIMESTAMP/g" /tmp/index.html.template > /tmp/index.html
+  
+  # Pull and run Nginx container with custom content
+  - docker pull nginx:latest
+  - docker run -d --name nginx --restart=unless-stopped -p 8000:80 nginx:latest
+  
+  # Wait a bit for container to start
+  - sleep 10
+  
+  # Copy our custom index.html to the nginx container
+  - docker cp /tmp/index.html nginx:/usr/share/nginx/html/index.html
+  
+  # Setup healthcheck endpoint
+  - docker exec nginx bash -c 'echo "ok" > /usr/share/nginx/html/health'
+  
+  # Test the health endpoint
+  - curl -I http://localhost:8000/health || echo "Health endpoint not ready"
+  
+  # Test the main page
+  - curl -I http://localhost:8000/ || echo "Main page not ready yet"
+  
+  # Clean up temporary files
+  - rm -f /tmp/index.html.template /tmp/index.html
+
+# Set timezone
+timezone: UTC
+
+final_message: "Custom Nginx with VM info and Docker setup complete! Load balancer test page should be accessible on port 8000."
